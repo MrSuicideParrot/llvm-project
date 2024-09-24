@@ -1,3 +1,7 @@
+#
+# Modified at the University of Rochester for the Silhouette Project.
+#
+
 set(LLVM_TARGET_DEFINITIONS ARM.td)
 
 tablegen(LLVM ARMGenAsmMatcher.inc -gen-asm-matcher)
@@ -47,6 +51,11 @@ add_llvm_target(ARMCodeGen
   ARMOptimizeBarriersPass.cpp
   ARMRegisterBankInfo.cpp
   ARMSelectionDAGInfo.cpp
+  ARMSilhouetteInstrumentor.cpp
+  ARMSilhouetteLabelCFI.cpp
+  ARMSilhouetteSFI.cpp
+  ARMSilhouetteSTR2STRT.cpp
+  ARMSilhouetteShadowStack.cpp
   ARMSubtarget.cpp
   ARMTargetMachine.cpp
   ARMTargetObjectFile.cpp

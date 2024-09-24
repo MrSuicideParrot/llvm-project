@@ -1,11 +1,15 @@
 //===-- ARMTargetMachine.cpp - Define TargetMachine for ARM ---------------===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+//              Copyright (c) 2019-2020, University of Rochester
+//
+// Part of the LLVM and Silhouette Projects, under the Apache License v2.0
+// with LLVM Exceptions.
+// See LICENSE.txt in the top-level directory for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
+// Modified at the University of Rochester for the Silhouette Project.
 //
 //===----------------------------------------------------------------------===//
 
@@ -15,6 +19,10 @@
 #include "ARMSubtarget.h"
 #include "ARMTargetObjectFile.h"
 #include "ARMTargetTransformInfo.h"
+#include "ARMSilhouetteLabelCFI.h"
+#include "ARMSilhouetteSFI.h"
+#include "ARMSilhouetteSTR2STRT.h"
+#include "ARMSilhouetteShadowStack.h"
 #include "MCTargetDesc/ARMMCTargetDesc.h"
 #include "TargetInfo/ARMTargetInfo.h"
 #include "llvm/ADT/Optional.h"
@@ -68,6 +76,52 @@ static cl::opt<bool>
 EnableARMLoadStoreOpt("arm-load-store-opt", cl::Hidden,
                       cl::desc("Enable ARM load/store optimization pass"),
                       cl::init(true));
+
+// Silhouette commandline options
+bool Silhouette;
+static cl::opt<bool, true>
+EnableSilhouette("enable-arm-silhouette",
+                 cl::desc("Enable all of Silhouette passes"),
+                 cl::location(Silhouette),
+                 cl::init(false), cl::Hidden);
+
+bool SilhouetteStr2Strt;
+static cl::opt<bool, true>
+EnableSilhouetteStr2Strt("enable-arm-silhouette-str2strt",
+                         cl::desc("Enable Silhouette store to unprivileged store pass"),
+                         cl::location(SilhouetteStr2Strt),
+                         cl::init(false), cl::Hidden);
+
+bool SilhouetteCFI;
+static cl::opt<bool, true>
+EnableSilhouetteCFI("enable-arm-silhouette-cfi",
+                    cl::desc("Enable Silhouette CFI pass"),
+                    cl::location(SilhouetteCFI),
+                    cl::init(false), cl::Hidden);
+
+bool SilhouetteShadowStack;
+static cl::opt<bool, true>
+EnableSilhouetteShadowStack("enable-arm-silhouette-shadowstack",
+                            cl::desc("Enable Silhouette shadow stack pass"),
+                            cl::location(SilhouetteShadowStack),
+                            cl::init(false), cl::Hidden);
+
+bool SilhouetteInvert;
+static cl::opt<bool, true>
+EnableSilhouetteInvert("enable-arm-silhouette-invert",
+                       cl::desc("Enable Silhouette Invert"),
+                       cl::location(SilhouetteInvert),
+                       cl::init(false), cl::Hidden);
+
+SilhouetteSFIOption SilhouetteSFI;
+static cl::opt<SilhouetteSFIOption, true>
+EnableSilhouetteSFI("enable-arm-silhouette-sfi",
+                    cl::desc("Enable Silhouette SFI"),
+                    cl::location(SilhouetteSFI),
+                    cl::init(NoSFI), cl::Hidden,
+                    cl::values(clEnumValN(NoSFI, "none", "No SFI"),
+                               clEnumValN(SelSFI, "selective", "Selective SFI"),
+                               clEnumValN(FullSFI, "full", "Full SFI")));
 
 // FIXME: Unify control over GlobalMerge.
 static cl::opt<cl::boolOrDefault>
@@ -419,6 +473,10 @@ void ARMPassConfig::addIRPasses() {
   // Match interleaved memory accesses to ldN/stN intrinsics.
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createInterleavedAccessPass());
+
+  if (EnableSilhouetteCFI) {
+    addPass(createIndirectBrExpandPass());
+  }
 }
 
 void ARMPassConfig::addCodeGenPrepare() {
@@ -529,6 +587,25 @@ void ARMPassConfig::addPreEmitPass() {
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createARMOptimizeBarriersPass());
 
-  addPass(createARMConstantIslandPass());
   addPass(createARMLowOverheadLoopsPass());
+
+  // Add Silhouette passes.
+
+  if (EnableSilhouette || EnableSilhouetteShadowStack) {
+    addPass(createARMSilhouetteShadowStack());
+  }
+
+  if (EnableSilhouette || EnableSilhouetteSFI != NoSFI || EnableSilhouetteStr2Strt) {
+    addPass(createARMSilhouetteSFI());
+  }
+
+  if (EnableSilhouette || EnableSilhouetteStr2Strt) {
+    addPass(createARMSilhouetteSTR2STRT());
+  }
+
+  if (EnableSilhouette || EnableSilhouetteCFI) {
+    addPass(createARMSilhouetteLabelCFI());
+  }
+
+  addPass(createARMConstantIslandPass());
 }

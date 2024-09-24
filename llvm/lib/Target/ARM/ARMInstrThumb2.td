@@ -1,12 +1,19 @@
 //===-- ARMInstrThumb2.td - Thumb2 support for ARM ---------*- tablegen -*-===//
 //
-// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
-// See https://llvm.org/LICENSE.txt for license information.
+//              Copyright (c) 2019-2020, University of Rochester
+//
+// Part of the LLVM and Silhouette Projects, under the Apache License v2.0
+// with LLVM Exceptions.
+// See LICENSE.txt in the top-level directory for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 //
 // This file describes the Thumb2 instruction set.
+//
+//===----------------------------------------------------------------------===//
+//
+// Modified at the University of Rochester for the Silhouette Project.
 //
 //===----------------------------------------------------------------------===//
 
@@ -1395,6 +1402,48 @@ def t2LEApcrelJT : t2PseudoInst<(outs rGPR:$Rd),
 let canFoldAsLoad = 1, isReMaterializable = 1  in
 defm t2LDR   : T2I_ld<0, 0b10, "ldr", IIC_iLoad_i, IIC_iLoad_si, GPR, load>;
 
+let isReturn = 1, isTerminator = 1, isBarrier = 1, mayLoad = 1,
+    isCodeGenOnly = 1 in {
+  def t2LDRi12_RET : T2Ii12<(outs GPR:$Rt), (ins t2addrmode_imm12:$addr),
+                            IIC_iLoad_i, "ldr", ".w\t$Rt, $addr", []>,
+                     Sched<[WriteLd]> {
+    bits<4> Rt;
+    bits<17> addr;
+    let Inst{31-25} = 0b1111100;
+    let Inst{24} = 0;
+    let Inst{23} = 1;
+    let Inst{22-21} = 0b10;
+    let Inst{20} = 1; // load
+    let Inst{19-16} = addr{16-13}; // Rn
+    let Inst{15-12} = Rt;
+    let Inst{11-0}  = addr{11-0};  // imm
+
+    let DecoderMethod = "DecodeT2LoadImm12";
+  }
+
+  def t2LDRs_RET : T2Iso <(outs GPR:$Rt), (ins t2addrmode_so_reg:$addr),
+                          IIC_iLoad_si, "ldr", ".w\t$Rt, $addr", []>,
+                   Sched<[WriteLd]> {
+    let Inst{31-27} = 0b11111;
+    let Inst{26-25} = 0b00;
+    let Inst{24} = 0;
+    let Inst{23} = 0;
+    let Inst{22-21} = 0b10;
+    let Inst{20} = 1; // load
+    let Inst{11-6} = 0b000000;
+
+    bits<4> Rt;
+    let Inst{15-12} = Rt;
+
+    bits<10> addr;
+    let Inst{19-16} = addr{9-6}; // Rn
+    let Inst{3-0}   = addr{5-2}; // Rm
+    let Inst{5-4}   = addr{1-0}; // imm
+
+    let DecoderMethod = "DecodeT2LoadShift";
+  }
+}
+
 // Loads with zero extension
 defm t2LDRH  : T2I_ld<0, 0b01, "ldrh", IIC_iLoad_bh_i, IIC_iLoad_bh_si,
                       GPRnopc, zextloadi16>;
@@ -1684,7 +1733,7 @@ def t2STRH_preidx: t2PseudoInst<(outs GPRnopc:$Rn_wb),
 // only.
 // Ref: A8.6.193 STR (immediate, Thumb) Encoding T4
 class T2IstT<bits<2> type, string opc, InstrItinClass ii>
-  : T2Ii8<(outs rGPR:$Rt), (ins t2addrmode_imm8:$addr), ii, opc,
+  : T2Ii8<(outs), (ins rGPR:$Rt, t2addrmode_imm8:$addr), ii, opc,
           "\t$Rt, $addr", []>, Sched<[WriteST]> {
   let Inst{31-27} = 0b11111;
   let Inst{26-25} = 0b00;
