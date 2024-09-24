@@ -22,7 +22,6 @@
 #include "clang/StaticAnalyzer/Checkers/BuiltinCheckerRegistration.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/BugType.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
-#include <optional>
 
 using namespace clang;
 using namespace ento;
@@ -84,7 +83,7 @@ void EnumCastOutOfRangeChecker::reportWarning(CheckerContext &C) const {
           new BuiltinBug(this, "Enum cast out of range",
                          "The value provided to the cast expression is not in "
                          "the valid range of values for the enum"));
-    C.emitReport(std::make_unique<PathSensitiveBugReport>(
+    C.emitReport(llvm::make_unique<BugReport>(
         *EnumValueCastOutOfRange, EnumValueCastOutOfRange->getDescription(),
         N));
   }
@@ -95,10 +94,10 @@ void EnumCastOutOfRangeChecker::checkPreStmt(const CastExpr *CE,
 
   // Only perform enum range check on casts where such checks are valid.  For
   // all other cast kinds (where enum range checks are unnecessary or invalid),
-  // just return immediately.  TODO: The set of casts allowed for enum range
-  // checking may be incomplete.  Better to add a missing cast kind to enable a
-  // missing check than to generate false negatives and have to remove those
-  // later.
+  // just return immediately.  TODO: The set of casts whitelisted for enum
+  // range checking may be incomplete.  Better to add a missing cast kind to
+  // enable a missing check than to generate false negatives and have to remove
+  // those later.
   switch (CE->getCastKind()) {
   case CK_IntegralCast:
     break;
@@ -109,7 +108,7 @@ void EnumCastOutOfRangeChecker::checkPreStmt(const CastExpr *CE,
   }
 
   // Get the value of the expression to cast.
-  const std::optional<DefinedOrUnknownSVal> ValueToCast =
+  const llvm::Optional<DefinedOrUnknownSVal> ValueToCast =
       C.getSVal(CE->getSubExpr()).getAs<DefinedOrUnknownSVal>();
 
   // If the value cannot be reasoned about (not even a DefinedOrUnknownSVal),
@@ -143,6 +142,6 @@ void ento::registerEnumCastOutOfRangeChecker(CheckerManager &mgr) {
   mgr.registerChecker<EnumCastOutOfRangeChecker>();
 }
 
-bool ento::shouldRegisterEnumCastOutOfRangeChecker(const CheckerManager &mgr) {
+bool ento::shouldRegisterEnumCastOutOfRangeChecker(const LangOptions &LO) {
   return true;
 }

@@ -1,39 +1,32 @@
-# The LLVM Compiler Infrastructure
+# The LLVM-Based Silhouette Compiler
 
-Welcome to the LLVM project!
+This repository contains the source code of the LLVM-based Silhouette compiler.
 
-This repository contains the source code for LLVM, a toolkit for the
-construction of highly optimized compilers, optimizers, and run-time
-environments.
+## How to Compile Silhouette
+Compiling the Silhouette compiler is exactly the same as compiling a
+standard LLVM compiler. Therefore you can compile it in whatever way you
+are used to compiling the LLVM compiler infrastructure.
+If you are not familiar with compiling LLVM, please refer to [this
+script](https://github.com/URSec/Silhouette-Evaluation/blob/master/build/build.llvm.sh)
+to see how we built the compiler.
 
-The LLVM project has multiple components. The core of the project is
-itself called "LLVM". This contains all of the tools, libraries, and header
-files needed to process intermediate representations and convert them into
-object files. Tools include an assembler, disassembler, bitcode analyzer, and
-bitcode optimizer.
-
-C-like languages use the [Clang](http://clang.llvm.org/) frontend. This
-component compiles C, C++, Objective-C, and Objective-C++ code into LLVM bitcode
--- and from there into object files, using LLVM.
-
-Other components include:
-the [libc++ C++ standard library](https://libcxx.llvm.org),
-the [LLD linker](https://lld.llvm.org), and more.
-
-## Getting the Source Code and Building LLVM
-
-Consult the
-[Getting Started with LLVM](https://llvm.org/docs/GettingStarted.html#getting-the-source-code-and-building-llvm)
-page for information on building and running LLVM.
-
-For information on how to contribute to the LLVM project, please take a look at
-the [Contributing to LLVM](https://llvm.org/docs/Contributing.html) guide.
-
-## Getting in touch
-
-Join the [LLVM Discourse forums](https://discourse.llvm.org/), [Discord
-chat](https://discord.gg/xS7Z362), or #llvm IRC channel on
-[OFTC](https://oftc.net/).
-
-The LLVM project has adopted a [code of conduct](https://llvm.org/docs/CodeOfConduct.html) for
-participants to all modes of communication within the project.
+## How to Use Silhouette
+To enable Silhouette transformations when compiling a C program, add the
+following options to `CFLAGS`:
+```shell
+-mllvm -enable-arm-silhouette-str2strt    # Enable the store hardening pass
+-mllvm -enable-arm-silhouette-shadowstack # Enable the shadow stack pass
+-mllvm -enable-arm-silhouette-cfi         # Enable the CFI pass
+```
+Alternatively, you can use the following option to turn on all of the above
+passes as a shortcut:
+```shell
+-mllvm -enable-arm-silhouette # Enable all of the Silhouette passes
+```
+Because Silhouette uses a parallel shadow stack, the compiler needs to
+know the shadow stack offset relative to the regular stack.  This offset
+is 14 MB by default and can be specified with a custom value using the
+following option:
+```shell
+-mllvm -arm-silhouette-shadowstack-offset=XXX # Set the shadow stack offset to XXX
+```

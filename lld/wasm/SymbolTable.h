@@ -15,10 +15,9 @@
 #include "lld/Common/LLVM.h"
 #include "llvm/ADT/CachedHashString.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/BinaryFormat/WasmTraits.h"
-#include <optional>
 
-namespace lld::wasm {
+namespace lld {
+namespace wasm {
 
 class InputSegment;
 
@@ -36,13 +35,13 @@ class InputSegment;
 // There is one add* function per symbol type.
 class SymbolTable {
 public:
-  ArrayRef<Symbol *> symbols() const { return symVector; }
-
   void wrap(Symbol *sym, Symbol *real, Symbol *wrap);
 
   void addFile(InputFile *file);
 
-  void compileBitcodeFiles();
+  void addCombinedLTOObject();
+
+  ArrayRef<Symbol *> getSymbols() const { return symVector; }
 
   Symbol *find(StringRef name);
 
@@ -53,35 +52,21 @@ public:
   Symbol *addDefinedFunction(StringRef name, uint32_t flags, InputFile *file,
                              InputFunction *function);
   Symbol *addDefinedData(StringRef name, uint32_t flags, InputFile *file,
-                         InputChunk *segment, uint64_t address, uint64_t size);
+                         InputSegment *segment, uint32_t address,
+                         uint32_t size);
   Symbol *addDefinedGlobal(StringRef name, uint32_t flags, InputFile *file,
                            InputGlobal *g);
-  Symbol *addDefinedTag(StringRef name, uint32_t flags, InputFile *file,
-                        InputTag *t);
-  Symbol *addDefinedTable(StringRef name, uint32_t flags, InputFile *file,
-                          InputTable *t);
+  Symbol *addDefinedEvent(StringRef name, uint32_t flags, InputFile *file,
+                          InputEvent *e);
 
-  Symbol *addUndefinedFunction(StringRef name,
-                               std::optional<StringRef> importName,
-                               std::optional<StringRef> importModule,
-                               uint32_t flags, InputFile *file,
-                               const WasmSignature *signature,
+  Symbol *addUndefinedFunction(StringRef name, StringRef importName,
+                               StringRef importModule, uint32_t flags,
+                               InputFile *file, const WasmSignature *signature,
                                bool isCalledDirectly);
   Symbol *addUndefinedData(StringRef name, uint32_t flags, InputFile *file);
-  Symbol *addUndefinedGlobal(StringRef name,
-                             std::optional<StringRef> importName,
-                             std::optional<StringRef> importModule,
-                             uint32_t flags, InputFile *file,
-                             const WasmGlobalType *type);
-  Symbol *addUndefinedTable(StringRef name, std::optional<StringRef> importName,
-                            std::optional<StringRef> importModule,
-                            uint32_t flags, InputFile *file,
-                            const WasmTableType *type);
-  Symbol *addUndefinedTag(StringRef name, std::optional<StringRef> importName,
-                          std::optional<StringRef> importModule, uint32_t flags,
-                          InputFile *file, const WasmSignature *sig);
-
-  TableSymbol *resolveIndirectFunctionTable(bool required);
+  Symbol *addUndefinedGlobal(StringRef name, StringRef importName,
+                             StringRef importModule,  uint32_t flags,
+                             InputFile *file, const WasmGlobalType *type);
 
   void addLazy(ArchiveFile *f, const llvm::object::Archive::Symbol *sym);
 
@@ -92,22 +77,16 @@ public:
                                     InputGlobal *global);
   DefinedFunction *addSyntheticFunction(StringRef name, uint32_t flags,
                                         InputFunction *function);
-  DefinedData *addOptionalDataSymbol(StringRef name, uint64_t value = 0);
-  DefinedGlobal *addOptionalGlobalSymbol(StringRef name, InputGlobal *global);
-  DefinedTable *addSyntheticTable(StringRef name, uint32_t flags,
-                                  InputTable *global);
+  DefinedData *addOptionalDataSymbol(StringRef name, uint32_t value = 0);
 
   void handleSymbolVariants();
   void handleWeakUndefines();
-  DefinedFunction *createUndefinedStub(const WasmSignature &sig);
 
   std::vector<ObjFile *> objectFiles;
-  std::vector<StubFile *> stubFiles;
   std::vector<SharedFile *> sharedFiles;
   std::vector<BitcodeFile *> bitcodeFiles;
   std::vector<InputFunction *> syntheticFunctions;
   std::vector<InputGlobal *> syntheticGlobals;
-  std::vector<InputTable *> syntheticTables;
 
 private:
   std::pair<Symbol *, bool> insert(StringRef name, const InputFile *file);
@@ -117,10 +96,6 @@ private:
                           const InputFile *file, Symbol **out);
   InputFunction *replaceWithUnreachable(Symbol *sym, const WasmSignature &sig,
                                         StringRef debugName);
-  void replaceWithUndefined(Symbol *sym);
-
-  TableSymbol *createDefinedIndirectFunctionTable(StringRef name);
-  TableSymbol *createUndefinedIndirectFunctionTable(StringRef name);
 
   // Maps symbol names to index into the symVector.  -1 means that symbols
   // is to not yet in the vector but it should have tracing enabled if it is
@@ -128,10 +103,9 @@ private:
   llvm::DenseMap<llvm::CachedHashStringRef, int> symMap;
   std::vector<Symbol *> symVector;
 
-  // For certain symbols types, e.g. function symbols, we allow for multiple
+  // For certain symbols types, e.g. function symbols, we allow for muliple
   // variants of the same symbol with different signatures.
   llvm::DenseMap<llvm::CachedHashStringRef, std::vector<Symbol *>> symVariants;
-  llvm::DenseMap<WasmSignature, DefinedFunction *> stubFunctions;
 
   // Comdat groups define "link once" sections. If two comdat groups have the
   // same name, only one of them is linked, and the other is ignored. This set
@@ -144,6 +118,7 @@ private:
 
 extern SymbolTable *symtab;
 
-} // namespace lld::wasm
+} // namespace wasm
+} // namespace lld
 
 #endif

@@ -1,4 +1,4 @@
-//===-- interception_linux.cpp ----------------------------------*- C++ -*-===//
+//===-- interception_linux.cc -----------------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -14,7 +14,7 @@
 #include "interception.h"
 
 #if SANITIZER_LINUX || SANITIZER_FREEBSD || SANITIZER_NETBSD || \
-    SANITIZER_SOLARIS
+    SANITIZER_OPENBSD || SANITIZER_SOLARIS
 
 #include <dlfcn.h>   // for dlsym() and dlvsym()
 
@@ -33,7 +33,7 @@ static int StrCmp(const char *s1, const char *s2) {
 }
 #endif
 
-static void *GetFuncAddr(const char *name, uptr trampoline) {
+static void *GetFuncAddr(const char *name) {
 #if SANITIZER_NETBSD
   // FIXME: Find a better way to handle renames
   if (StrCmp(name, "sigaction"))
@@ -47,37 +47,32 @@ static void *GetFuncAddr(const char *name, uptr trampoline) {
     // want the address of the real definition, though, so look it up using
     // RTLD_DEFAULT.
     addr = dlsym(RTLD_DEFAULT, name);
-
-    // In case `name' is not loaded, dlsym ends up finding the actual wrapper.
-    // We don't want to intercept the wrapper and have it point to itself.
-    if ((uptr)addr == trampoline)
-      addr = nullptr;
   }
   return addr;
 }
 
 bool InterceptFunction(const char *name, uptr *ptr_to_real, uptr func,
-                       uptr trampoline) {
-  void *addr = GetFuncAddr(name, trampoline);
+                       uptr wrapper) {
+  void *addr = GetFuncAddr(name);
   *ptr_to_real = (uptr)addr;
-  return addr && (func == trampoline);
+  return addr && (func == wrapper);
 }
 
-// dlvsym is a GNU extension supported by some other platforms.
-#if SANITIZER_GLIBC || SANITIZER_FREEBSD || SANITIZER_NETBSD
+// Android and Solaris do not have dlvsym
+#if !SANITIZER_ANDROID && !SANITIZER_SOLARIS && !SANITIZER_OPENBSD
 static void *GetFuncAddr(const char *name, const char *ver) {
   return dlvsym(RTLD_NEXT, name, ver);
 }
 
 bool InterceptFunction(const char *name, const char *ver, uptr *ptr_to_real,
-                       uptr func, uptr trampoline) {
+                       uptr func, uptr wrapper) {
   void *addr = GetFuncAddr(name, ver);
   *ptr_to_real = (uptr)addr;
-  return addr && (func == trampoline);
+  return addr && (func == wrapper);
 }
-#  endif  // SANITIZER_GLIBC || SANITIZER_FREEBSD || SANITIZER_NETBSD
+#endif  // !SANITIZER_ANDROID
 
 }  // namespace __interception
 
 #endif  // SANITIZER_LINUX || SANITIZER_FREEBSD || SANITIZER_NETBSD ||
-        // SANITIZER_SOLARIS
+        // SANITIZER_OPENBSD || SANITIZER_SOLARIS

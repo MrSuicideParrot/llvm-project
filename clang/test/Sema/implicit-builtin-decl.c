@@ -1,7 +1,8 @@
-// RUN: %clang_cc1 -fsyntax-only -Wno-strict-prototypes -verify %s
+// RUN: %clang_cc1 -fsyntax-only -verify %s
+// RUN: not %clang_cc1 -fsyntax-only -ast-dump %s | FileCheck %s
 
 void f() {
-  int *ptr = malloc(sizeof(int) * 10); // expected-error{{call to undeclared library function 'malloc' with type}} \
+  int *ptr = malloc(sizeof(int) * 10); // expected-warning{{implicitly declaring library function 'malloc' with type}} \
   // expected-note{{include the header <stdlib.h> or explicitly provide a declaration for 'malloc'}} \
   // expected-note{{'malloc' is a builtin with type 'void *}}
 }
@@ -24,7 +25,7 @@ void h() {
 
 void f2() {
   fprintf(0, "foo"); // expected-warning{{declaration of built-in function 'fprintf' requires inclusion of the header <stdio.h>}} \
-   expected-error {{call to undeclared function 'fprintf'; ISO C99 and later do not support implicit function declarations}}
+   expected-warning {{implicit declaration of function 'fprintf' is invalid in C99}}
 }
 
 // PR2892
@@ -54,12 +55,17 @@ main(int argc, char *argv[])
 
 void snprintf() { }
 
-void longjmp();
+// PR8316 & PR40692
+void longjmp(); // expected-warning{{declaration of built-in function 'longjmp' requires the declaration of the 'jmp_buf' type, commonly provided in the header <setjmp.h>.}}
 
 extern float fmaxf(float, float);
 
 struct __jmp_buf_tag {};
-void sigsetjmp(struct __jmp_buf_tag[1], int);
+void sigsetjmp(struct __jmp_buf_tag[1], int); // expected-warning{{declaration of built-in function 'sigsetjmp' requires the declaration of the 'jmp_buf' type, commonly provided in the header <setjmp.h>.}}
+
+// CHECK:     FunctionDecl {{.*}} <line:[[@LINE-2]]:1, col:44> col:6 sigsetjmp '
+// CHECK-NOT: FunctionDecl
+// CHECK:     ReturnsTwiceAttr {{.*}} <{{.*}}> Implicit
 
 // PR40692
 void pthread_create(); // no warning expected
