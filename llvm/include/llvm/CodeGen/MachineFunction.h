@@ -1086,10 +1086,6 @@ public:
       MCSymbol *PostInstrSymbol = nullptr, MDNode *HeapAllocMarker = nullptr,
       MDNode *PCSections = nullptr, uint32_t CFIType = 0);
 
-  MachineInstr::ExtraInfo *createMIExtraInfoWithMarker(
-      ArrayRef<MachineMemOperand *> MMOs, MCSymbol *PreInstrSymbol,
-      MCSymbol *PostInstrSymbol, MDNode *HeapAllocMarker);
-
   /// Allocate a string and populate it with the given external symbol name.
   const char *createExternalSymbolName(StringRef Name);
 

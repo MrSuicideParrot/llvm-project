@@ -80,7 +80,7 @@ namespace llvm {
     MachineFunction & MF = *MI.getMF();
     const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-    unsigned PredReg;
+    Register  PredReg;
     ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
     unsigned addOpc = Imm < 0 ? ARM::t2SUBri12 : ARM::t2ADDri12;

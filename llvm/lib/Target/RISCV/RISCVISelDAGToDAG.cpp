@@ -2160,9 +2160,6 @@ bool RISCVDAGToDAGISel::SelectInlineAsmMemoryOperand(
     OutOps.push_back(
         CurDAG->getTargetConstant(0, SDLoc(Op), Subtarget->getXLenVT()));
     return false;
-  case InlineAsm::Constraint_A:
-    OutOps.push_back(Op);
-    return false;
   default:
     report_fatal_error("Unexpected asm memory constraint " +
                        InlineAsm::getMemConstraintName(ConstraintID));

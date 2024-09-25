@@ -63,7 +63,7 @@ ARMSilhouetteShadowStack::setupShadowStack(MachineInstr & MI) {
 
   int offset = ShadowStackOffset;
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   std::vector<MachineInstr *> NewMIs;
@@ -176,7 +176,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
 
   int offset = ShadowStackOffset;
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   std::vector<MachineInstr *> NewMIs;
@@ -288,7 +288,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
     NewMIs.back()->copyImplicitOps(MF, MI);
     for (unsigned i = MI.getNumOperands() - 1, e = MI.getNumExplicitOperands();
          i >= e; --i) {
-      MI.RemoveOperand(i);
+      MI.removeOperand(i);
     }
     LLVM_FALLTHROUGH;
   case ARM::t2LDMIA_UPD:
@@ -296,7 +296,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
     // we replace it with a LDR_POST
     assert(MI.getNumExplicitOperands() >= 6 && "Buggy LDMIA_UPD!");
     if (MI.getNumExplicitOperands() > 6) {
-      MI.RemoveOperand(MI.getOperandNo(&PCLR));
+      MI.removeOperand(MI.getOperandNo(&PCLR));
     } else {
       unsigned Idx = MI.getOperandNo(&PCLR);
       Idx = Idx == 4 ? 5 : 4; // Index of the other register than PC/LR
@@ -317,7 +317,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
     NewMIs.back()->copyImplicitOps(MF, MI);
     for (unsigned i = MI.getNumOperands() - 1, e = MI.getNumExplicitOperands();
          i >= e; --i) {
-      MI.RemoveOperand(i);
+      MI.removeOperand(i);
     }
     LLVM_FALLTHROUGH;
   case ARM::tPOP:
@@ -325,7 +325,7 @@ ARMSilhouetteShadowStack::popFromShadowStack(MachineInstr & MI,
     // remove it
     assert(MI.getNumExplicitOperands() >= 3 && "Buggy POP!");
     if (MI.getNumExplicitOperands() > 3) {
-      MI.RemoveOperand(MI.getOperandNo(&PCLR));
+      MI.removeOperand(MI.getOperandNo(&PCLR));
     } else {
       removeInst(MI);
     }

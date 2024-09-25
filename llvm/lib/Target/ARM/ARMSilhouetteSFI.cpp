@@ -93,7 +93,7 @@ doBitmasking(MachineInstr & MI, Register Reg, std::vector<MachineInstr *> & Inst
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const DebugLoc & DL = MI.getDebugLoc();
@@ -142,7 +142,7 @@ handleSPUncommonImmediate(MachineInstr & MI, Register SrcReg, int64_t Imm,
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const DebugLoc & DL = MI.getDebugLoc();
@@ -309,7 +309,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
   for (MachineInstr * Store : Stores) {
     MachineInstr & MI = *Store;
 
-    unsigned PredReg;
+    Register PredReg;
     ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
     const DebugLoc & DL = MI.getDebugLoc();
@@ -454,7 +454,7 @@ ARMSilhouetteSFI::runOnMachineFunction(MachineFunction & MF) {
       // Need to change t2STR[BH]s to t2STR[BH]i12
       MI.setDesc(TII->get(immediateStoreOpcode(MI.getOpcode())));
       MI.getOperand(2).ChangeToImmediate(0);
-      MI.RemoveOperand(3);
+      MI.removeOperand(3);
       InstsAfter.push_back(BuildMI(MF, DL, TII->get(ARM::t2SUBrs), BaseReg)
                            .addReg(BaseReg)
                            .addReg(OffsetReg)

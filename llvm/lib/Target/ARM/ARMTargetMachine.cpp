@@ -501,18 +501,15 @@ void ARMPassConfig::addIRPasses() {
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createInterleavedAccessPass());
 
-<<<<<<< HEAD
   // Add Control Flow Guard checks.
   if (TM->getTargetTriple().isOSWindows())
     addPass(createCFGuardCheckPass());
 
   if (TM->Options.JMCInstrument)
     addPass(createJMCInstrumenterPass());
-=======
   if (EnableSilhouetteCFI) {
     addPass(createIndirectBrExpandPass());
   }
->>>>>>> release/9.x
 }
 
 void ARMPassConfig::addCodeGenPrepare() {

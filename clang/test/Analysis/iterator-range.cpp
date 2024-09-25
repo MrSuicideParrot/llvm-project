@@ -946,8 +946,3 @@ int uninit_var(int n) {
   // expected-warning@-1 {{The right operand of '-' is a garbage value}}
   // expected-note@-2 {{The right operand of '-' is a garbage value}}
 }
-
-void iter_diff(std::vector<int> &V) {
-  auto i0 = V.begin(), i1 = V.end();
-  ptrdiff_t len = i1 - i0; // no-crash
-}

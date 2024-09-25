@@ -12,15 +12,13 @@
 #===------------------------------------------------------------------------===#
 
 System=`uname -s`
+Machine=`uname -m`
 if [ "$System" = "FreeBSD" ]; then
     MAKE=gmake
 else
     MAKE=make
 fi
 generator="Unix Makefiles"
-
-# Base SVN URL for the sources.
-Base_url="http://llvm.org/svn/llvm-project"
 
 Release=""
 Release_no_dot=""
@@ -32,18 +30,31 @@ do_debug="no"
 do_asserts="no"
 do_compare="yes"
 do_rt="yes"
+do_clang_tools="yes"
 do_libs="yes"
 do_libcxxabi="yes"
 do_libunwind="yes"
 do_test_suite="yes"
 do_openmp="yes"
 do_lld="yes"
-do_lldb="no"
+do_lldb="yes"
 do_polly="yes"
+do_mlir="yes"
+do_flang="yes"
+do_silent_log="no"
 BuildDir="`pwd`"
 ExtraConfigureFlags=""
 ExportBranch=""
 git_ref=""
+
+do_bolt="no"
+if [ "$System" = "Linux" ]; then
+    case $Machine in
+        x86_64 | arm64 | aarch64 )
+            do_bolt="yes"
+            ;;
+    esac
+fi
 
 function usage() {
     echo "usage: `basename $0` -release X.Y.Z -rc NUM [OPTIONS]"
@@ -63,6 +74,7 @@ function usage() {
     echo " -configure-flags FLAGS  Extra flags to pass to the configure step."
     echo " -git-ref sha         Use the specified git ref for testing instead of a release."
     echo " -no-rt               Disable check-out & build Compiler-RT"
+    echo " -no-clang-tools      Disable check-out & build clang-tools-extra"
     echo " -no-libs             Disable check-out & build libcxx/libcxxabi/libunwind"
     echo " -no-libcxxabi        Disable check-out & build libcxxabi"
     echo " -no-libunwind        Disable check-out & build libunwind"
@@ -72,6 +84,9 @@ function usage() {
     echo " -lldb                Enable check-out & build lldb"
     echo " -no-lldb             Disable check-out & build lldb (default)"
     echo " -no-polly            Disable check-out & build Polly"
+    echo " -no-mlir             Disable check-out & build MLIR"
+    echo " -no-flang            Disable check-out & build Flang"
+    echo " -silent-log          Don't output build logs to stdout"
 }
 
 while [ $# -gt 0 ]; do
@@ -143,6 +158,9 @@ while [ $# -gt 0 ]; do
         -no-libs )
             do_libs="no"
             ;;
+        -no-clang-tools )
+            do_clang_tools="no"
+            ;;
         -no-libcxxabi )
             do_libcxxabi="no"
             ;;
@@ -154,6 +172,12 @@ while [ $# -gt 0 ]; do
             ;;
         -no-openmp )
             do_openmp="no"
+            ;;
+        -bolt )
+            do_bolt="yes"
+            ;;
+        -no-bolt )
+            do_bolt="no"
             ;;
         -no-lld )
             do_lld="no"
@@ -167,6 +191,15 @@ while [ $# -gt 0 ]; do
         -no-polly )
             do_polly="no"
             ;;
+        -no-mlir )
+            do_mlir="no"
+            ;;
+        -no-flang )
+            do_flang="no"
+            ;;
+        -silent-log )
+            do_silent_log="yes"
+            ;;
         -help | --help | -h | --h | -\? )
             usage
             exit 0
@@ -179,6 +212,11 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+if [ $do_mlir = "no" ] && [ $do_flang = "yes" ]; then
+  echo "error: cannot build Flang without MLIR"
+  exit 1
+fi
 
 # Check required arguments.
 if [ -z "$Release" ]; then
@@ -223,35 +261,43 @@ if [ -z "$NumJobs" ]; then
 fi
 
 # Projects list
-projects="llvm clang clang-tools-extra"
+projects="llvm;clang"
+if [ $do_clang_tools = "yes" ]; then
+  projects="${projects:+$projects;}clang-tools-extra"
+fi
+runtimes=""
 if [ $do_rt = "yes" ]; then
-  projects="$projects compiler-rt"
+  runtimes="${runtimes:+$runtimes;}compiler-rt"
 fi
 if [ $do_libs = "yes" ]; then
-  projects="$projects libcxx"
+  runtimes="${runtimes:+$runtimes;}libcxx"
   if [ $do_libcxxabi = "yes" ]; then
-    projects="$projects libcxxabi"
+    runtimes="${runtimes:+$runtimes;}libcxxabi"
   fi
   if [ $do_libunwind = "yes" ]; then
-    projects="$projects libunwind"
+    runtimes="${runtimes:+$runtimes;}libunwind"
   fi
 fi
-case $do_test_suite in
-  yes|export-only)
-    projects="$projects test-suite"
-    ;;
-esac
 if [ $do_openmp = "yes" ]; then
-  projects="$projects openmp"
+  projects="${projects:+$projects;}openmp"
+fi
+if [ $do_bolt = "yes" ]; then
+  projects="${projects:+$projects;}bolt"
 fi
 if [ $do_lld = "yes" ]; then
-  projects="$projects lld"
+  projects="${projects:+$projects;}lld"
 fi
 if [ $do_lldb = "yes" ]; then
-  projects="$projects lldb"
+  projects="${projects:+$projects;}lldb"
 fi
 if [ $do_polly = "yes" ]; then
-  projects="$projects polly"
+  projects="${projects:+$projects;}polly"
+fi
+if [ $do_mlir = "yes" ]; then
+  projects="${projects:+$projects;}mlir"
+fi
+if [ $do_flang = "yes" ]; then
+  projects="${projects:+$projects;}flang"
 fi
 
 # Go to the build directory (may be different from CWD)
@@ -289,8 +335,11 @@ function check_program_exists() {
   fi
 }
 
-if [ "$System" != "Darwin" ]; then
+if [ "$System" != "Darwin" ] && [ "$System" != "SunOS" ] && [ "$System" != "AIX" ]; then
   check_program_exists 'chrpath'
+fi
+
+if [ "$System" != "Darwin" ]; then
   check_program_exists 'file'
   check_program_exists 'objdump'
 fi
@@ -355,7 +404,23 @@ function configure_llvmCore() {
             ;;
     esac
 
-    project_list=${projects// /;}
+    # During the first two phases, there is no need to build any of the projects
+    # except clang, since these phases are only meant to produce a bootstrapped
+    # clang compiler, capable of building the third phase.
+    if [ "$Phase" -lt "3" ]; then
+      project_list="clang"
+    else
+      project_list="$projects"
+    fi
+    # During the first phase, there is no need to build any of the runtimes,
+    # since this phase is only meant to get a clang compiler, capable of
+    # building itself and any selected runtimes in the second phase.
+    if [ "$Phase" -lt "2" ]; then
+      runtime_list=""
+    else
+      runtime_list="$runtimes"
+    fi
+
     echo "# Using C compiler: $c_compiler"
     echo "# Using C++ compiler: $cxx_compiler"
 
@@ -365,13 +430,19 @@ function configure_llvmCore() {
     echo "#" env CC="$c_compiler" CXX="$cxx_compiler" \
         cmake -G "$generator" \
         -DCMAKE_BUILD_TYPE=$BuildType -DLLVM_ENABLE_ASSERTIONS=$Assertions \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DLLVM_ENABLE_PROJECTS="$project_list" \
+        -DLLVM_LIT_ARGS="-j $NumJobs $LitVerbose" \
+        -DLLVM_ENABLE_RUNTIMES="$runtime_list" \
         $ExtraConfigureFlags $BuildDir/llvm-project/llvm \
         2>&1 | tee $LogDir/llvm.configure-Phase$Phase-$Flavor.log
     env CC="$c_compiler" CXX="$cxx_compiler" \
         cmake -G "$generator" \
         -DCMAKE_BUILD_TYPE=$BuildType -DLLVM_ENABLE_ASSERTIONS=$Assertions \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
         -DLLVM_ENABLE_PROJECTS="$project_list" \
+        -DLLVM_LIT_ARGS="-j $NumJobs $LitVerbose" \
+        -DLLVM_ENABLE_RUNTIMES="$runtime_list" \
         $ExtraConfigureFlags $BuildDir/llvm-project/llvm \
         2>&1 | tee $LogDir/llvm.configure-Phase$Phase-$Flavor.log
 
@@ -388,17 +459,24 @@ function build_llvmCore() {
     if [ ${MAKE} = 'ninja' ]; then
       Verbose="-v"
     fi
+    LitVerbose="-v"
+
+    redir="/dev/stdout"
+    if [ $do_silent_log == "yes" ]; then
+      echo "# Silencing build logs because of -silent-log flag..."
+      redir="/dev/null"
+    fi
 
     cd $ObjDir
     echo "# Compiling llvm $Release-$RC $Flavor"
     echo "# ${MAKE} -j $NumJobs $Verbose"
     ${MAKE} -j $NumJobs $Verbose \
-        2>&1 | tee $LogDir/llvm.make-Phase$Phase-$Flavor.log
+        2>&1 | tee $LogDir/llvm.make-Phase$Phase-$Flavor.log > $redir
 
     echo "# Installing llvm $Release-$RC $Flavor"
     echo "# ${MAKE} install"
     DESTDIR="${DestDir}" ${MAKE} install \
-        2>&1 | tee $LogDir/llvm.install-Phase$Phase-$Flavor.log
+        2>&1 | tee $LogDir/llvm.install-Phase$Phase-$Flavor.log > $redir
     cd $BuildDir
 }
 
@@ -415,7 +493,7 @@ function test_llvmCore() {
     fi
 
     cd $ObjDir
-    if ! ( ${MAKE} -j $NumJobs $KeepGoing check-all \
+    if ! ( ${MAKE} -j $NumJobs $KeepGoing $Verbose check-all \
         2>&1 | tee $LogDir/llvm.check-Phase$Phase-$Flavor.log ) ; then
       deferred_error $Phase $Flavor "check-all failed"
     fi
@@ -423,9 +501,10 @@ function test_llvmCore() {
     if [ $do_test_suite = 'yes' ]; then
       cd $TestSuiteBuildDir
       env CC="$c_compiler" CXX="$cxx_compiler" \
-          cmake $TestSuiteSrcDir -G "$generator" -DTEST_SUITE_LIT=$Lit
+          cmake $TestSuiteSrcDir -G "$generator" -DTEST_SUITE_LIT=$Lit \
+                -DTEST_SUITE_HOST_CC=$build_compiler
 
-      if ! ( ${MAKE} -j $NumJobs $KeepGoing check \
+      if ! ( ${MAKE} -j $NumJobs $KeepGoing $Verbose check \
           2>&1 | tee $LogDir/llvm.check-Phase$Phase-$Flavor.log ) ; then
         deferred_error $Phase $Flavor "test suite failed"
       fi
@@ -436,7 +515,7 @@ function test_llvmCore() {
 # Clean RPATH. Libtool adds the build directory to the search path, which is
 # not necessary --- and even harmful --- for the binary packages we release.
 function clean_RPATH() {
-  if [ "$System" = "Darwin" ]; then
+  if [ "$System" = "Darwin" ] || [ "$System" = "SunOS" ] || [ "$System" = "AIX" ]; then
     return
   fi
   local InstallPath="$1"
@@ -459,9 +538,9 @@ function package_release() {
     cd $BuildDir/Phase3/Release
     mv llvmCore-$Release-$RC.install/usr/local $Package
     if [ "$use_gzip" = "yes" ]; then
-      tar cfz $BuildDir/$Package.tar.gz $Package
+      tar cf - $Package | gzip -9c > $BuildDir/$Package.tar.gz
     else
-      tar cfJ $BuildDir/$Package.tar.xz $Package
+      tar cf - $Package | xz -9ce -T $NumJobs > $BuildDir/$Package.tar.xz
     fi
     mv $Package llvmCore-$Release-$RC.install/usr/local
     cd $cwd
@@ -473,6 +552,10 @@ function package_release() {
 set -e
 set -o pipefail
 
+# Turn off core dumps, as some test cases can easily fill up even the largest
+# file systems.
+ulimit -c 0
+
 if [ "$do_checkout" = "yes" ]; then
     export_sources
 fi
@@ -480,12 +563,15 @@ fi
 # Setup the test-suite.  Do this early so we can catch failures before
 # we do the full 3 stage build.
 if [ $do_test_suite = "yes" ]; then
+  check_program_exists 'python3'
+  venv="python3 -m venv"
+
   SandboxDir="$BuildDir/sandbox"
   Lit=$SandboxDir/bin/lit
   TestSuiteBuildDir="$BuildDir/test-suite-build"
   TestSuiteSrcDir="$BuildDir/llvm-test-suite"
 
-  virtualenv $SandboxDir
+  ${venv} $SandboxDir
   $SandboxDir/bin/python $BuildDir/llvm-project/llvm/utils/lit/setup.py install
   mkdir -p $TestSuiteBuildDir
 fi
@@ -512,6 +598,8 @@ for Flavor in $Flavors ; do
 
     c_compiler="$CC"
     cxx_compiler="$CXX"
+    build_compiler="$CC"
+    [[ -z "$build_compiler" ]] && build_compiler="cc"
     llvmCore_phase1_objdir=$BuildDir/Phase1/$Flavor/llvmCore-$Release-$RC.obj
     llvmCore_phase1_destdir=$BuildDir/Phase1/$Flavor/llvmCore-$Release-$RC.install
 

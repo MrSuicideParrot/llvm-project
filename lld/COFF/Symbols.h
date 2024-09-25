@@ -22,13 +22,6 @@
 
 namespace lld {
 
-std::string toString(coff::Symbol &b);
-
-// There are two different ways to convert an Archive::Symbol to a string:
-// One for Microsoft name mangling and one for Itanium name mangling.
-// Call the functions toCOFFString and toELFString, not just toString.
-std::string toCOFFString(const coff::Archive::Symbol &b);
-
 namespace coff {
 
 using llvm::object::Archive;
@@ -37,6 +30,7 @@ using llvm::object::coff_import_header;
 using llvm::object::coff_symbol_generic;
 
 class ArchiveFile;
+class COFFLinkerContext;
 class InputFile;
 class ObjFile;
 class SymbolTable;
@@ -59,7 +53,9 @@ public:
     DefinedSyntheticKind,
 
     UndefinedKind,
-    LazyKind,
+    LazyArchiveKind,
+    LazyObjectKind,
+    LazyDLLSymbolKind,
 
     LastDefinedCOFFKind = DefinedCommonKind,
     LastDefinedKind = DefinedSyntheticKind,
@@ -68,7 +64,18 @@ public:
   Kind kind() const { return static_cast<Kind>(symbolKind); }
 
   // Returns the symbol name.
-  StringRef getName();
+  StringRef getName() {
+    // COFF symbol names are read lazily for a performance reason.
+    // Non-external symbol names are never used by the linker except for logging
+    // or debugging. Their internal references are resolved not by name but by
+    // symbol index. And because they are not external, no one can refer them by
+    // name. Object files contain lots of non-external symbols, and creating
+    // StringRefs for them (which involves lots of strlen() on the string table)
+    // is a waste of time.
+    if (nameData == nullptr)
+      computeName();
+    return StringRef(nameData, nameSize);
+  }
 
   void replaceKeepingName(Symbol *other, size_t size);
 
@@ -79,13 +86,25 @@ public:
   // after calling markLive.
   bool isLive() const;
 
+  bool isLazy() const {
+    return symbolKind == LazyArchiveKind || symbolKind == LazyObjectKind ||
+           symbolKind == LazyDLLSymbolKind;
+  }
+
+private:
+  void computeName();
+
 protected:
   friend SymbolTable;
   explicit Symbol(Kind k, StringRef n = "")
       : symbolKind(k), isExternal(true), isCOMDAT(false),
         writtenToSymtab(false), pendingArchiveLoad(false), isGCRoot(false),
-        isRuntimePseudoReloc(false), nameSize(n.size()),
-        nameData(n.empty() ? nullptr : n.data()) {}
+        isRuntimePseudoReloc(false), deferUndefined(false), canInline(true),
+        isWeak(false), nameSize(n.size()),
+        nameData(n.empty() ? nullptr : n.data()) {
+    assert((!n.empty() || k <= LastDefinedCOFFKind) &&
+           "If the name is empty, the Symbol must be a DefinedCOFF.");
+  }
 
   const unsigned symbolKind : 8;
   unsigned isExternal : 1;
@@ -110,6 +129,21 @@ public:
   unsigned isGCRoot : 1;
 
   unsigned isRuntimePseudoReloc : 1;
+
+  // True if we want to allow this symbol to be undefined in the early
+  // undefined check pass in SymbolTable::reportUnresolvable(), as it
+  // might be fixed up later.
+  unsigned deferUndefined : 1;
+
+  // False if LTO shouldn't inline whatever this symbol points to. If a symbol
+  // is overwritten after LTO, LTO shouldn't inline the symbol because it
+  // doesn't know the final contents of the symbol.
+  unsigned canInline : 1;
+
+  // True if the symbol is weak. This is only tracked for bitcode/LTO symbols.
+  // This information isn't written to the output; rather, it's used for
+  // managing weak symbol overrides.
+  unsigned isWeak : 1;
 
 protected:
   // Symbol name length. Assume symbol lengths fit in a 32-bit integer.
@@ -166,10 +200,11 @@ public:
   DefinedRegular(InputFile *f, StringRef n, bool isCOMDAT,
                  bool isExternal = false,
                  const coff_symbol_generic *s = nullptr,
-                 SectionChunk *c = nullptr)
+                 SectionChunk *c = nullptr, bool isWeak = false)
       : DefinedCOFF(DefinedRegularKind, f, n, s), data(c ? &c->repl : nullptr) {
     this->isExternal = isExternal;
     this->isCOMDAT = isCOMDAT;
+    this->isWeak = isWeak;
   }
 
   static bool classof(const Symbol *s) {
@@ -209,28 +244,25 @@ private:
 // Absolute symbols.
 class DefinedAbsolute : public Defined {
 public:
-  DefinedAbsolute(StringRef n, COFFSymbolRef s)
-      : Defined(DefinedAbsoluteKind, n), va(s.getValue()) {
+  DefinedAbsolute(const COFFLinkerContext &c, StringRef n, COFFSymbolRef s)
+      : Defined(DefinedAbsoluteKind, n), va(s.getValue()), ctx(c) {
     isExternal = s.isExternal();
   }
 
-  DefinedAbsolute(StringRef n, uint64_t v)
-      : Defined(DefinedAbsoluteKind, n), va(v) {}
+  DefinedAbsolute(const COFFLinkerContext &c, StringRef n, uint64_t v)
+      : Defined(DefinedAbsoluteKind, n), va(v), ctx(c) {}
 
   static bool classof(const Symbol *s) {
     return s->kind() == DefinedAbsoluteKind;
   }
 
-  uint64_t getRVA() { return va - config->imageBase; }
+  uint64_t getRVA();
   void setVA(uint64_t v) { va = v; }
-
-  // Section index relocations against absolute symbols resolve to
-  // this 16 bit number, and it is the largest valid section index
-  // plus one. This variable keeps it.
-  static uint16_t numOutputSections;
+  uint64_t getVA() const { return va; }
 
 private:
   uint64_t va;
+  const COFFLinkerContext &ctx;
 };
 
 // This symbol is used for linker-synthesized symbols like __ImageBase and
@@ -256,24 +288,39 @@ private:
 // This class represents a symbol defined in an archive file. It is
 // created from an archive file header, and it knows how to load an
 // object file from an archive to replace itself with a defined
-// symbol. If the resolver finds both Undefined and Lazy for
-// the same name, it will ask the Lazy to load a file.
-class Lazy : public Symbol {
+// symbol. If the resolver finds both Undefined and LazyArchive for
+// the same name, it will ask the LazyArchive to load a file.
+class LazyArchive : public Symbol {
 public:
-  Lazy(ArchiveFile *f, const Archive::Symbol s)
-      : Symbol(LazyKind, s.getName()), file(f), sym(s) {}
+  LazyArchive(ArchiveFile *f, const Archive::Symbol s)
+      : Symbol(LazyArchiveKind, s.getName()), file(f), sym(s) {}
 
-  static bool classof(const Symbol *s) { return s->kind() == LazyKind; }
+  static bool classof(const Symbol *s) { return s->kind() == LazyArchiveKind; }
 
   MemoryBufferRef getMemberBuffer();
 
   ArchiveFile *file;
-
-private:
-  friend SymbolTable;
-
-private:
   const Archive::Symbol sym;
+};
+
+class LazyObject : public Symbol {
+public:
+  LazyObject(InputFile *f, StringRef n) : Symbol(LazyObjectKind, n), file(f) {}
+  static bool classof(const Symbol *s) { return s->kind() == LazyObjectKind; }
+  InputFile *file;
+};
+
+// MinGW only.
+class LazyDLLSymbol : public Symbol {
+public:
+  LazyDLLSymbol(DLLFile *f, DLLFile::Symbol *s, StringRef n)
+      : Symbol(LazyDLLSymbolKind, n), file(f), sym(s) {}
+  static bool classof(const Symbol *s) {
+    return s->kind() == LazyDLLSymbolKind;
+  }
+
+  DLLFile *file;
+  DLLFile::Symbol *sym;
 };
 
 // Undefined symbols.
@@ -320,6 +367,13 @@ public:
   uint16_t getOrdinal() { return file->hdr->OrdinalHint; }
 
   ImportFile *file;
+
+  // This is a pointer to the synthetic symbol associated with the load thunk
+  // for this symbol that will be called if the DLL is delay-loaded. This is
+  // needed for Control Flow Guard because if this DefinedImportData symbol is a
+  // valid call target, the corresponding load thunk must also be marked as a
+  // valid call target.
+  DefinedSynthetic *loadThunkSym = nullptr;
 };
 
 // This class represents a symbol for a jump table entry which jumps
@@ -329,7 +383,8 @@ public:
 // a regular name. A function pointer is given as a DefinedImportData.
 class DefinedImportThunk : public Defined {
 public:
-  DefinedImportThunk(StringRef name, DefinedImportData *s, uint16_t machine);
+  DefinedImportThunk(COFFLinkerContext &ctx, StringRef name,
+                     DefinedImportData *s, uint16_t machine);
 
   static bool classof(const Symbol *s) {
     return s->kind() == DefinedImportThunkKind;
@@ -351,8 +406,9 @@ private:
 // This is here just for compatibility with MSVC.
 class DefinedLocalImport : public Defined {
 public:
-  DefinedLocalImport(StringRef n, Defined *s)
-      : Defined(DefinedLocalImportKind, n), data(make<LocalImportChunk>(s)) {}
+  DefinedLocalImport(COFFLinkerContext &ctx, StringRef n, Defined *s)
+      : Defined(DefinedLocalImportKind, n),
+        data(make<LocalImportChunk>(ctx, s)) {}
 
   static bool classof(const Symbol *s) {
     return s->kind() == DefinedLocalImportKind;
@@ -381,7 +437,9 @@ inline uint64_t Defined::getRVA() {
     return cast<DefinedCommon>(this)->getRVA();
   case DefinedRegularKind:
     return cast<DefinedRegular>(this)->getRVA();
-  case LazyKind:
+  case LazyArchiveKind:
+  case LazyObjectKind:
+  case LazyDLLSymbolKind:
   case UndefinedKind:
     llvm_unreachable("Cannot get the address for an undefined symbol.");
   }
@@ -404,7 +462,9 @@ inline Chunk *Defined::getChunk() {
     return cast<DefinedLocalImport>(this)->getChunk();
   case DefinedCommonKind:
     return cast<DefinedCommon>(this)->getChunk();
-  case LazyKind:
+  case LazyArchiveKind:
+  case LazyObjectKind:
+  case LazyDLLSymbolKind:
   case UndefinedKind:
     llvm_unreachable("Cannot get the chunk of an undefined symbol.");
   }
@@ -419,11 +479,13 @@ union SymbolUnion {
   alignas(DefinedCommon) char b[sizeof(DefinedCommon)];
   alignas(DefinedAbsolute) char c[sizeof(DefinedAbsolute)];
   alignas(DefinedSynthetic) char d[sizeof(DefinedSynthetic)];
-  alignas(Lazy) char e[sizeof(Lazy)];
+  alignas(LazyArchive) char e[sizeof(LazyArchive)];
   alignas(Undefined) char f[sizeof(Undefined)];
   alignas(DefinedImportData) char g[sizeof(DefinedImportData)];
   alignas(DefinedImportThunk) char h[sizeof(DefinedImportThunk)];
   alignas(DefinedLocalImport) char i[sizeof(DefinedLocalImport)];
+  alignas(LazyObject) char j[sizeof(LazyObject)];
+  alignas(LazyDLLSymbol) char k[sizeof(LazyDLLSymbol)];
 };
 
 template <typename T, typename... ArgT>
@@ -435,9 +497,15 @@ void replaceSymbol(Symbol *s, ArgT &&... arg) {
                 "SymbolUnion not aligned enough");
   assert(static_cast<Symbol *>(static_cast<T *>(nullptr)) == nullptr &&
          "Not a Symbol");
+  bool canInline = s->canInline;
   new (s) T(std::forward<ArgT>(arg)...);
+  s->canInline = canInline;
 }
 } // namespace coff
+
+std::string toString(const coff::COFFLinkerContext &ctx, coff::Symbol &b);
+std::string toCOFFString(const coff::COFFLinkerContext &ctx,
+                         const llvm::object::Archive::Symbol &b);
 
 } // namespace lld
 

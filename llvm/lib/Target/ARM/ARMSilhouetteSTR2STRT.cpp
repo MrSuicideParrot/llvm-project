@@ -62,7 +62,7 @@ backupRegisters(MachineInstr & MI, Register Reg1, Register Reg2,
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const DebugLoc & DL = MI.getDebugLoc();
@@ -138,7 +138,7 @@ restoreRegisters(MachineInstr & MI, Register Reg1, Register Reg2,
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const DebugLoc & DL = MI.getDebugLoc();
@@ -183,7 +183,7 @@ handleSPWithUncommonImm(MachineInstr & MI, Register SrcReg, int64_t Imm,
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const DebugLoc & DL = MI.getDebugLoc();
@@ -267,7 +267,7 @@ handleSPWithOffsetReg(MachineInstr & MI, Register SrcReg, Register OffsetReg,
   MachineFunction & MF = *MI.getMF();
   const TargetInstrInfo * TII = MF.getSubtarget().getInstrInfo();
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const DebugLoc & DL = MI.getDebugLoc();
@@ -459,7 +459,7 @@ ARMSilhouetteSTR2STRT::runOnMachineFunction(MachineFunction & MF) {
   for (MachineInstr * Store : Stores) {
     MachineInstr & MI = *Store;
 
-    unsigned PredReg;
+    Register PredReg;
     ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
     const DebugLoc & DL = MI.getDebugLoc();

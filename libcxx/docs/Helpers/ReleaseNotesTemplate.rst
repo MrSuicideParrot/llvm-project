@@ -1,6 +1,6 @@
-==========================
-Libc++ 9.0.0 Release Notes
-==========================
+===========================================
+Libc++ XX.YY.ZZ (In-Progress) Release Notes
+===========================================
 
 .. contents::
    :local:
@@ -8,12 +8,17 @@ Libc++ 9.0.0 Release Notes
 
 Written by the `Libc++ Team <https://libcxx.llvm.org>`_
 
+.. warning::
+
+   These are in-progress notes for the upcoming libc++ XX.YY.ZZ release.
+   Release notes for previous releases can be found on
+   `the Download Page <https://releases.llvm.org/download.html>`_.
 
 Introduction
 ============
 
 This document contains the release notes for the libc++ C++ Standard Library,
-part of the LLVM Compiler Infrastructure, release 9.0.0. Here we describe the
+part of the LLVM Compiler Infrastructure, release XX.YY.ZZ. Here we describe the
 status of libc++ in some detail, including major improvements from the previous
 release and new feature work. For the general LLVM release notes, see `the LLVM
 documentation <https://llvm.org/docs/ReleaseNotes.html>`_. All LLVM releases may
@@ -22,39 +27,36 @@ be downloaded from the `LLVM releases web site <https://llvm.org/releases/>`_.
 For more information about libc++, please see the `Libc++ Web Site
 <https://libcxx.llvm.org>`_ or the `LLVM Web Site <https://llvm.org>`_.
 
+Note that if you are reading this file from a Git checkout or the
+main Libc++ web page, this document applies to the *next* release, not
+the current one. To see the release notes for a specific release, please
+see the `releases page <https://llvm.org/releases/>`_.
 
-What's New in Libc++ 9.0.0?
-===========================
+What's New in Libc++ XX.YY.ZZ?
+==============================
 
-Fixes
------
 
-* Minor fixes to ``std::chrono`` operators.
-* libc++ now correctly handles Objective-C++ ARC qualifiers in ``std::is_pointer``.
-* ``std::span`` general updates and fixes.
-* Updates to the ``std::abs`` implementation.
-* ``std::to_chars`` now adds leading zeros.
-* Ensure ``std::tuple`` is trivially constructible.
-* ``std::aligned_union`` now works in C++03.
-* Output of nullptr to ``std::basic_ostream`` is formatted properly.
+Implemented Papers
+------------------
 
-Features
---------
 
-* Implemented P0608: sane variant converting constructor.
-* Added ``ssize`` function.
-* Added ``front`` and ``back`` methods in ``std::span``.
-* ``std::is_unbounded_array`` and ``std::is_bounded_array`` added to type traits.
-* ``std::atomic`` now includes many new features and specialization including improved Freestanding support.
-* Added ``std::midpoint`` and ``std::lerp`` math functions.
-* Added the function ``std::is_constant_evaluated``.
-* Erase-like algorithms now return size type.
-* Added ``contains`` method to container types.
-* ``std::swap`` is now a constant expression.
+Improvements and New Features
+-----------------------------
 
-Updates
--------
 
-* libc++ dropped support for GCC 4.9; we now support GCC 5.1 and above.
-* libc++ added explicit support for WebAssembly System Interface (WASI).
-* Progress towards full support of rvalues and variadics in C++03 mode. ``std::move`` and ``std::forward`` now both work in C++03 mode.
+Deprecations and Removals
+-------------------------
+
+
+Upcoming Deprecations and Removals
+----------------------------------
+
+NOTE: THIS SHOULD BE POPULATED FROM THE PREVIOUS RELEASE'S UPCOMING DEPRECATIONS AND REMOVALS FOR THE NEXT-NEXT RELEASE (IF ANY)
+
+ABI Affecting Changes
+---------------------
+
+
+Build System Changes
+--------------------
+

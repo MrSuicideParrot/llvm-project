@@ -1,3 +1,5 @@
+include(GNUInstallDirs)
+
 function(lldb_tablegen)
   # Syntax:
   # lldb_tablegen output-file [tablegen-arg ...] SOURCE source-file
@@ -35,12 +37,32 @@ function(add_lldb_library name)
   # only supported parameters to this macro are the optional
   # MODULE;SHARED;STATIC library type and source files
   cmake_parse_arguments(PARAM
-    "MODULE;SHARED;STATIC;OBJECT;PLUGIN"
+    "MODULE;SHARED;STATIC;OBJECT;PLUGIN;FRAMEWORK;NO_INTERNAL_DEPENDENCIES;NO_PLUGIN_DEPENDENCIES"
     "INSTALL_PREFIX;ENTITLEMENTS"
-    "EXTRA_CXXFLAGS;DEPENDS;LINK_LIBS;LINK_COMPONENTS"
+    "EXTRA_CXXFLAGS;DEPENDS;LINK_LIBS;LINK_COMPONENTS;CLANG_LIBS"
     ${ARGN})
   llvm_process_sources(srcs ${PARAM_UNPARSED_ARGUMENTS})
   list(APPEND LLVM_LINK_COMPONENTS ${PARAM_LINK_COMPONENTS})
+
+  if(PARAM_NO_INTERNAL_DEPENDENCIES)
+    foreach(link_lib ${PARAM_LINK_LIBS})
+      if (link_lib MATCHES "^lldb")
+        message(FATAL_ERROR
+          "Library ${name} cannot depend on any other lldb libs "
+          "(Found ${link_lib} in LINK_LIBS)")
+      endif()
+    endforeach()
+  endif()
+
+  if(PARAM_NO_PLUGIN_DEPENDENCIES)
+    foreach(link_lib ${PARAM_LINK_LIBS})
+      if (link_lib MATCHES "^lldbPlugin")
+        message(FATAL_ERROR
+          "Library ${name} cannot depend on a plugin (Found ${link_lib} in "
+          "LINK_LIBS)")
+      endif()
+    endforeach()
+  endif()
 
   if(PARAM_PLUGIN)
     set_property(GLOBAL APPEND PROPERTY LLDB_PLUGINS ${name})
@@ -91,6 +113,19 @@ function(add_lldb_library name)
       ${pass_ENTITLEMENTS}
       ${pass_NO_INSTALL_RPATH}
     )
+
+    if(CLANG_LINK_CLANG_DYLIB)
+      target_link_libraries(${name} PRIVATE clang-cpp)
+    else()
+      target_link_libraries(${name} PRIVATE ${PARAM_CLANG_LIBS})
+    endif()
+  endif()
+
+  # A target cannot be changed to a FRAMEWORK after calling install() because
+  # this may result in the wrong install DESTINATION. The FRAMEWORK property
+  # must be set earlier.
+  if(PARAM_FRAMEWORK)
+    set_target_properties(${name} PROPERTIES FRAMEWORK ON)
   endif()
 
   if(PARAM_SHARED)
@@ -100,7 +135,7 @@ function(add_lldb_library name)
     endif()
     # RUNTIME is relevant for DLL platforms, FRAMEWORK for macOS
     install(TARGETS ${name} COMPONENT ${name}
-      RUNTIME DESTINATION bin
+      RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
       LIBRARY DESTINATION ${install_dest}
       ARCHIVE DESTINATION ${install_dest}
       FRAMEWORK DESTINATION ${install_dest})
@@ -122,9 +157,20 @@ function(add_lldb_library name)
   target_compile_options(${name} PRIVATE ${PARAM_EXTRA_CXXFLAGS})
 
   if(PARAM_PLUGIN)
-    set_target_properties(${name} PROPERTIES FOLDER "lldb plugins")
+    get_property(parent_dir DIRECTORY PROPERTY PARENT_DIRECTORY)
+    if(EXISTS ${parent_dir})
+      get_filename_component(category ${parent_dir} NAME)
+      set_target_properties(${name} PROPERTIES FOLDER "lldb plugins/${category}")
+    endif()
   else()
     set_target_properties(${name} PROPERTIES FOLDER "lldb libraries")
+  endif()
+
+  # If we want to export all lldb symbols (i.e LLDB_EXPORT_ALL_SYMBOLS=ON), we
+  # need to use default visibility for all LLDB libraries even if a global
+  # `CMAKE_CXX_VISIBILITY_PRESET=hidden`is present.
+  if (LLDB_EXPORT_ALL_SYMBOLS)
+    set_target_properties(${name} PROPERTIES CXX_VISIBILITY_PRESET default)
   endif()
 endfunction(add_lldb_library)
 
@@ -132,7 +178,7 @@ function(add_lldb_executable name)
   cmake_parse_arguments(ARG
     "GENERATE_INSTALL"
     "INSTALL_PREFIX;ENTITLEMENTS"
-    "LINK_LIBS;LINK_COMPONENTS"
+    "LINK_LIBS;CLANG_LIBS;LINK_COMPONENTS;BUILD_RPATH;INSTALL_RPATH"
     ${ARGN}
     )
 
@@ -152,7 +198,22 @@ function(add_lldb_executable name)
   )
 
   target_link_libraries(${name} PRIVATE ${ARG_LINK_LIBS})
+  if(CLANG_LINK_CLANG_DYLIB)
+    target_link_libraries(${name} PRIVATE clang-cpp)
+  else()
+    target_link_libraries(${name} PRIVATE ${ARG_CLANG_LIBS})
+  endif()
   set_target_properties(${name} PROPERTIES FOLDER "lldb executables")
+
+  if (ARG_BUILD_RPATH)
+    set_target_properties(${name} PROPERTIES BUILD_RPATH "${ARG_BUILD_RPATH}")
+  endif()
+
+  if (ARG_INSTALL_RPATH)
+    set_target_properties(${name} PROPERTIES
+      BUILD_WITH_INSTALL_RPATH OFF
+      INSTALL_RPATH "${ARG_INSTALL_RPATH}")
+  endif()
 
   if(ARG_GENERATE_INSTALL)
     set(install_dest bin)
@@ -160,7 +221,10 @@ function(add_lldb_executable name)
       set(install_dest ${ARG_INSTALL_PREFIX})
     endif()
     install(TARGETS ${name} COMPONENT ${name}
-            RUNTIME DESTINATION ${install_dest})
+            RUNTIME DESTINATION ${install_dest}
+            LIBRARY DESTINATION ${install_dest}
+            BUNDLE DESTINATION ${install_dest}
+            FRAMEWORK DESTINATION ${install_dest})
     if (NOT CMAKE_CONFIGURATION_TYPES)
       add_llvm_install_targets(install-${name}
                                DEPENDS ${name}
@@ -199,14 +263,21 @@ endfunction()
 function(lldb_add_to_buildtree_lldb_framework name subdir)
   # Destination for the copy in the build-tree. While the framework target may
   # not exist yet, it will exist when the generator expression gets expanded.
-  get_target_property(framework_build_dir liblldb LIBRARY_OUTPUT_DIRECTORY)
-  set(copy_dest "${framework_build_dir}/${subdir}")
+  set(copy_dest "${LLDB_FRAMEWORK_ABSOLUTE_BUILD_DIR}/${subdir}/$<TARGET_FILE_NAME:${name}>")
 
   # Copy into the given subdirectory for testing.
   add_custom_command(TARGET ${name} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:${name}> ${copy_dest}
     COMMENT "Copy ${name} to ${copy_dest}"
   )
+
+  # Create a custom target to remove the copy again from LLDB.framework in the
+  # build tree.
+  add_custom_target(${name}-cleanup
+    COMMAND ${CMAKE_COMMAND} -E remove ${copy_dest}
+    COMMENT "Removing ${name} from LLDB.framework")
+  add_dependencies(lldb-framework-cleanup
+    ${name}-cleanup)
 endfunction()
 
 # Add extra install steps for dSYM creation and stripping for the given target.
@@ -242,27 +313,31 @@ function(lldb_add_post_install_steps_darwin name install_prefix)
   endif()
 
   # Generate dSYM
-  set(dsym_name ${output_name}.dSYM)
-  if(is_framework)
-    set(dsym_name ${output_name}.framework.dSYM)
-  endif()
-  if(LLDB_DEBUGINFO_INSTALL_PREFIX)
-    # This makes the path absolute, so we must respect DESTDIR.
-    set(dsym_name "\$ENV\{DESTDIR\}${LLDB_DEBUGINFO_INSTALL_PREFIX}/${dsym_name}")
+  if(NOT LLDB_SKIP_DSYM)
+    set(dsym_name ${output_name}.dSYM)
+    if(is_framework)
+      set(dsym_name ${output_name}.framework.dSYM)
+    endif()
+    if(LLDB_DEBUGINFO_INSTALL_PREFIX)
+      # This makes the path absolute, so we must respect DESTDIR.
+      set(dsym_name "\$ENV\{DESTDIR\}${LLDB_DEBUGINFO_INSTALL_PREFIX}/${dsym_name}")
+    endif()
+
+    set(buildtree_name ${buildtree_dir}/${bundle_subdir}${output_name})
+    install(CODE "message(STATUS \"Externalize debuginfo: ${dsym_name}\")" COMPONENT ${name})
+    install(CODE "execute_process(COMMAND xcrun dsymutil -o=${dsym_name} ${buildtree_name})"
+            COMPONENT ${name})
   endif()
 
-  set(buildtree_name ${buildtree_dir}/${bundle_subdir}${output_name})
-  install(CODE "message(STATUS \"Externalize debuginfo: ${dsym_name}\")" COMPONENT ${name})
-  install(CODE "execute_process(COMMAND xcrun dsymutil -o=${dsym_name} ${buildtree_name})"
-          COMPONENT ${name})
-
-  # Strip distribution binary with -ST (removing debug symbol table entries and
-  # Swift symbols). Avoid CMAKE_INSTALL_DO_STRIP and llvm_externalize_debuginfo()
-  # as they can't be configured sufficiently.
-  set(installtree_name "\$ENV\{DESTDIR\}${install_prefix}/${bundle_subdir}${output_name}")
-  install(CODE "message(STATUS \"Stripping: ${installtree_name}\")" COMPONENT ${name})
-  install(CODE "execute_process(COMMAND xcrun strip -ST ${installtree_name})"
-          COMPONENT ${name})
+  if(NOT LLDB_SKIP_STRIP)
+    # Strip distribution binary with -ST (removing debug symbol table entries and
+    # Swift symbols). Avoid CMAKE_INSTALL_DO_STRIP and llvm_externalize_debuginfo()
+    # as they can't be configured sufficiently.
+    set(installtree_name "\$ENV\{DESTDIR\}${install_prefix}/${bundle_subdir}${output_name}")
+    install(CODE "message(STATUS \"Stripping: ${installtree_name}\")" COMPONENT ${name})
+    install(CODE "execute_process(COMMAND xcrun strip -ST ${installtree_name})"
+            COMPONENT ${name})
+  endif()
 endfunction()
 
 # CMake's set_target_properties() doesn't allow to pass lists for RPATH
@@ -300,3 +375,36 @@ function(lldb_find_system_debugserver path)
     endif()
   endif()
 endfunction()
+
+function(lldb_find_python_module module)
+  set(MODULE_FOUND PY_${module}_FOUND)
+  if (DEFINED ${MODULE_FOUND})
+    return()
+  endif()
+
+  execute_process(COMMAND "${Python3_EXECUTABLE}" "-c" "import ${module}"
+    RESULT_VARIABLE status
+    ERROR_QUIET)
+
+  if (status)
+    set(${MODULE_FOUND} OFF CACHE BOOL "Failed to find python module '${module}'")
+    message(STATUS "Could NOT find Python module '${module}'")
+  else()
+    set(${MODULE_FOUND} ON CACHE BOOL "Found python module '${module}'")
+    message(STATUS "Found Python module '${module}'")
+  endif()
+endfunction()
+
+# Removes all module flags from the current CMAKE_CXX_FLAGS. Used for
+# the Objective-C++ code in lldb which we don't want to build with modules.
+# Reasons for this are that modules with Objective-C++ would require that
+# all LLVM/Clang modules are Objective-C++ compatible (which they are likely
+# not) and we would have rebuild a second set of modules just for the few
+# Objective-C++ files in lldb (which slows down the build process).
+macro(remove_module_flags)
+  string(REGEX REPLACE "-fmodules-cache-path=[^ ]+" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  string(REGEX REPLACE "-fmodules-local-submodule-visibility" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  string(REGEX REPLACE "-fmodules" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  string(REGEX REPLACE "-gmodules" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+  string(REGEX REPLACE "-fcxx-modules" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+endmacro()

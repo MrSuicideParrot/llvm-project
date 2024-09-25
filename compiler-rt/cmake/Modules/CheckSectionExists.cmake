@@ -1,9 +1,7 @@
-add_compiler_rt_component(crt)
-
-function(check_cxx_section_exists section output)
+function(check_section_exists section output)
   cmake_parse_arguments(ARG "" "" "SOURCE;FLAGS" ${ARGN})
   if(NOT ARG_SOURCE)
-    set(ARG_SOURCE "int main() { return 0; }\n")
+    set(ARG_SOURCE "int main(void) { return 0; }\n")
   endif()
 
   string(RANDOM TARGET_NAME)
@@ -18,6 +16,20 @@ function(check_cxx_section_exists section output)
   set(try_compile_flags "${ARG_FLAGS}")
   if(CMAKE_C_COMPILER_ID MATCHES Clang AND CMAKE_C_COMPILER_TARGET)
     list(APPEND try_compile_flags "-target ${CMAKE_C_COMPILER_TARGET}")
+  endif()
+  append_list_if(COMPILER_RT_HAS_FNO_LTO_FLAG -fno-lto try_compile_flags)
+  if(NOT COMPILER_RT_ENABLE_PGO)
+    if(LLVM_PROFDATA_FILE AND COMPILER_RT_HAS_FNO_PROFILE_INSTR_USE_FLAG)
+      list(APPEND try_compile_flags "-fno-profile-instr-use")
+    endif()
+    if(LLVM_BUILD_INSTRUMENTED MATCHES IR AND COMPILER_RT_HAS_FNO_PROFILE_GENERATE_FLAG)
+      list(APPEND try_compile_flags "-fno-profile-generate")
+    elseif((LLVM_BUILD_INSTRUMENTED OR LLVM_BUILD_INSTRUMENTED_COVERAGE) AND COMPILER_RT_HAS_FNO_PROFILE_INSTR_GENERATE_FLAG)
+      list(APPEND try_compile_flags "-fno-profile-instr-generate")
+      if(LLVM_BUILD_INSTRUMENTED_COVERAGE AND COMPILER_RT_HAS_FNO_COVERAGE_MAPPING_FLAG)
+        list(APPEND try_compile_flags "-fno-coverage-mapping")
+      endif()
+    endif()
   endif()
 
   string(REPLACE ";" " " extra_flags "${try_compile_flags}")
@@ -42,6 +54,10 @@ function(check_cxx_section_exists section output)
     endif()
   endforeach()
 
+  # Strip quotes from the compile command, as the compiler is not expecting
+  # quoted arguments (potential quotes added from D62063).
+  string(REPLACE "\"" "" test_compile_command "${test_compile_command}")
+
   string(REPLACE " " ";" test_compile_command "${test_compile_command}")
 
   execute_process(
@@ -50,6 +66,12 @@ function(check_cxx_section_exists section output)
     OUTPUT_VARIABLE TEST_OUTPUT
     ERROR_VARIABLE TEST_ERROR
   )
+
+  # Explicitly throw a fatal error message if test_compile_command fails.
+  if(TEST_RESULT)
+    message(FATAL_ERROR "${TEST_ERROR}")
+    return()
+  endif()
 
   execute_process(
     COMMAND ${CMAKE_OBJDUMP} -h "${TARGET_NAME}/CheckSectionExists.o"
@@ -67,26 +89,3 @@ function(check_cxx_section_exists section output)
 
   file(REMOVE_RECURSE ${TARGET_NAME})
 endfunction()
-
-check_cxx_section_exists(".init_array" COMPILER_RT_HAS_INITFINI_ARRAY
-  SOURCE "volatile int x;\n__attribute__((constructor)) void f() {x = 0;}\nint main() { return 0; }\n")
-
-append_list_if(COMPILER_RT_HAS_STD_C11_FLAG -std=c11 CRT_CFLAGS)
-append_list_if(COMPILER_RT_HAS_INITFINI_ARRAY -DCRT_HAS_INITFINI_ARRAY CRT_CFLAGS)
-append_list_if(COMPILER_RT_HAS_FPIC_FLAG -fPIC CRT_CFLAGS)
-append_list_if(COMPILER_RT_HAS_WNO_PEDANTIC -Wno-pedantic CRT_CFLAGS)
-
-foreach(arch ${CRT_SUPPORTED_ARCH})
-  add_compiler_rt_runtime(clang_rt.crtbegin
-    OBJECT
-    ARCHS ${arch}
-    SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/crtbegin.c
-    CFLAGS ${CRT_CFLAGS}
-    PARENT_TARGET crt)
-  add_compiler_rt_runtime(clang_rt.crtend
-    OBJECT
-    ARCHS ${arch}
-    SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/crtend.c
-    CFLAGS ${CRT_CFLAGS}
-    PARENT_TARGET crt)
-endforeach()

@@ -488,7 +488,7 @@ ARMSilhouetteInstrumentor::findFreeRegistersBefore(const MachineInstr & MI,
   unsigned distance;
   const MachineInstr * IT = findIT(MI, distance);
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const MachineFunction & MF = *MI.getMF();
@@ -507,7 +507,7 @@ ARMSilhouetteInstrumentor::findFreeRegistersBefore(const MachineInstr & MI,
   while (I != MBBI) {
     unsigned distance2;
     const MachineInstr * IT2 = findIT(*--I, distance2);
-    unsigned PredReg2;
+    Register PredReg2;
     ARMCC::CondCodes Pred2 = getInstrPredicate(*I, PredReg2);
 
     if (IT2 != nullptr && IT == IT2) {
@@ -579,7 +579,7 @@ ARMSilhouetteInstrumentor::findFreeRegistersAfter(const MachineInstr & MI,
   unsigned distance;
   const MachineInstr * IT = findIT(MI, distance);
 
-  unsigned PredReg;
+  Register PredReg;
   ARMCC::CondCodes Pred = getInstrPredicate(MI, PredReg);
 
   const MachineFunction & MF = *MI.getMF();
@@ -606,7 +606,7 @@ ARMSilhouetteInstrumentor::findFreeRegistersAfter(const MachineInstr & MI,
   while (I != MBBI) {
     unsigned distance2;
     const MachineInstr * IT2 = findIT(*--I, distance2);
-    unsigned PredReg2;
+    Register PredReg2;
     ARMCC::CondCodes Pred2 = getInstrPredicate(*I, PredReg2);
 
     if (IT2 != nullptr && IT == IT2) {
